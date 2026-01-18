@@ -1,0 +1,79 @@
+import pandas as pd
+import yfinance as yf
+import numpy as np
+import pandas_datareader.data as web
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+
+# -----------------------------
+# CONFIG
+# -----------------------------
+TICKERS = ["AAPL", "AMZN", "GOOGL", "MSFT", "TSLA"]
+START_DATE = "2018-01-01"
+END_DATE = "2023-12-31"
+
+# -----------------------------
+# LOAD STOCK DATA
+# -----------------------------
+price_data = yf.download(TICKERS, start=START_DATE, end=END_DATE)["Close"]
+stock_returns = price_data.pct_change().dropna()
+
+# -----------------------------
+# LOAD FAMA-FRENCH FACTORS
+# -----------------------------
+ff = web.DataReader(
+    "F-F_Research_Data_5_Factors_2x3_Daily",
+    "famafrench",
+    START_DATE,
+    END_DATE
+)[0]
+
+ff.columns = [
+    "Market_Risk",
+    "Size_SMB",
+    "Value_HML",
+    "Profitability_RMW",
+    "Investment_CMA",
+    "RF",
+]
+ff = ff / 100
+
+# -----------------------------
+# ALIGN DATA
+# -----------------------------
+data = stock_returns.join(ff, how="inner")
+
+# -----------------------------
+# MULTI-FACTOR REGRESSION
+# -----------------------------
+results = {}
+
+for ticker in TICKERS:
+    y = data[ticker] - data["RF"]  # Excess return
+    X = data[
+        ["Market_Risk", "Size_SMB", "Value_HML", "Profitability_RMW", "Investment_CMA"]
+    ]
+    X = sm.add_constant(X)
+
+    model = sm.OLS(y, X).fit()
+    results[ticker] = model.params
+
+# -----------------------------
+# RESULTS TABLE
+# -----------------------------
+factor_exposures = pd.DataFrame(results).T
+print("\nFACTOR EXPOSURE SUMMARY\n")
+print(factor_exposures)
+
+# -----------------------------
+# VISUALIZATION
+# -----------------------------
+factor_exposures.drop(columns="const").plot(
+    kind="bar", figsize=(12, 6)
+)
+plt.title("Stock Factor Exposures (Fama-French 5 Factors)")
+plt.ylabel("Factor Loading")
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig("factor_exposures.png")
+plt.close()
